@@ -6,6 +6,7 @@
 //  Implements LSTM_Op forward and backward passes
 //  all functions are intended to operate on rank-2 tensors (batch, timestep)
 //  input operators are passed as tensors of shape (4,output_dim,input_dim)
+//  x operators map inputs of length HIST_SIZE onto outputs of length TARG_SIZE == HIDDEN_SIZE
 //  the size 4 corresponds to the input, forget, cell, and output operators
 //////////////////////////////////////////////////////////////////////
 #include <torch/extension.h>
@@ -13,21 +14,12 @@
 #include <stdlib.h>
 #include <vector>
 
-//x      ==               input
-//cs_p     ==         cell state (from previous iteration)
-//hs_p   ==         hidden state
-//iOp    ==      input operators
-//fOp    ==     forget operators
-//gOp    ==  cell gate operators
-//oOp    ==     output operators
+//x    ==                  input
+//cs_p  ==            cell state (from previous iteration)
+//hs_p  ==          hidden state
+//xOps  ==           x operators
+//hOps  ==      hidden operators
 
-//h*_Op  ==      hidden operator
-
-//currently, the forward pass is implemented under the assumption of cell and hidden states being of the same
-//shape as the output vector
-//
-//additionally, the LSTM cell is configured to hold batch_size cell and hidden states so that it can learn
-//to generate its states from each timestep of a single batch element rather than from each element of a batch
 
 //in pytorch the sigmoid function is defined as sig(x) = 1/(1+exp(-x)) -> d/dx_sig(x) = sig(x)*(1 - sig(x))
 torch::Tensor d_sig(torch::Tensor x)
@@ -42,6 +34,8 @@ torch::Tensor d_tanh(torch::Tensor x)
   return (1 - at::pow(t,2));
 }
 
+//x is of shape (batch_index, timestep)
+
 std::vector< at::Tensor > LSTM_Op_forward(torch::Tensor x, torch::Tensor c_p, torch::Tensor h_p, \
 					  torch::Tensor xOps, torch::Tensor hOps)
 {
@@ -53,6 +47,7 @@ std::vector< at::Tensor > LSTM_Op_forward(torch::Tensor x, torch::Tensor c_p, to
   auto xg = torch::add(torch::mm(x, gate_xOps[2].transpose(0,1)), torch::mm(h_p, gate_hOps[2].transpose(0,1)));
   auto xo = torch::add(torch::mm(x, gate_xOps[3].transpose(0,1)), torch::mm(h_p, gate_hOps[3].transpose(0,1)));
 
+  //transpose axes 0 and 1 to give Xs of shape (batch_index, gate_index, timestep)
   auto Xs = at::transpose(at::stack({xi,xf,xg,xo}), 0, 1);
   
   auto input_g = at::sigmoid(xi);
