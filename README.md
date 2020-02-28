@@ -1,6 +1,6 @@
 BPI_RNN
 ----
-The efficacy of high-rank linear operators as described [here](https://github.com/JasperHill/Captcha_Tests_Pytorch/Writeup.pdf) is investigated within the context of\
+The efficacy of high-rank linear operators as described [here](https://github.com/JasperHill/Captcha_Tests_Pytorch/blob/master/Writeups/Writeup.pdf) is investigated within the context of\
 a long-short-term memory(LSTM) layer trained to predict the bitcoin price index. The layout is similar to a standard LSTM layer. However, unlike traditional implementations, the configuration of this work lacks gate biases, and the weights, naturally, are high-rank linear operators.
 
 The network is created via `BPI_RNN.py` under the `build_tools` subdirectory. This generates an untrained state dictionary, which is accessed and overwritten by executing `Train_RNN.py`. Also under `build_tools` are `Custom_RNNs.py` and `RNN_passes.cpp`, which define the classes and methods employed by the network. Lastly, the data file from which the training and testing sets are derived as well as the network configuration parameters are set in `MODEL_CONSTANTS.py`. These currently include:
