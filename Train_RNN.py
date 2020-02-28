@@ -38,7 +38,7 @@ random.seed(time.time())
 ## import data file
 cwd = os.getcwd()
 data_path = os.path.join(cwd,'data')
-data_path = os.path.join(data_path,'BTC_USD_2013-10-01_2020-01-28-CoinDesk.csv')
+data_path = os.path.join(data_path, MODEL_CONSTANTS.DATA_FILE)
 
 pd_object = pd.read_csv(data_path,usecols=['Date','24h High (USD)','24h Low (USD)'])
 np_object = pd_object.to_numpy()
@@ -162,10 +162,8 @@ test_size = len(train_dl)
 ##  create/load and train the model
 #########################################################################
 
-LSTM_MODEL_SAVE_PATH = "./build_tools/lstm_saves.pth"
-
 lstm_model = BPI_RNN.LSTM_Model(BATCH_SIZE, 2, HIST_SIZE, 2, TARG_SIZE)
-lstm_model.load_state_dict(torch.load(LSTM_MODEL_SAVE_PATH))
+lstm_model.load_state_dict(torch.load(MODEL_CONSTANTS.MODEL_SAVE_PATH))
 
 optimizer = optim.Adam(lstm_model.parameters())
 
