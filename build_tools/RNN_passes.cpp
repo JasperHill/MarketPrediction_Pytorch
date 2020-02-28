@@ -4,8 +4,8 @@
 //////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 //  Implements LSTM_Op forward and backward passes
-//  all functions are intended to operate on rank-2 tensors (batch, timestep)
-//  input operators are passed as tensors of shape (4,output_dim,input_dim)
+//  all functions are intended to operate on rank-3 tensors (batch, high/low, timestep)
+//  input operators are passed as tensors of shape (4,output_channels, output_dim, input_channels, input_dim)
 //  x operators map inputs of length HIST_SIZE onto outputs of length TARG_SIZE == HIDDEN_SIZE
 //  the size 4 corresponds to the input, forget, cell, and output operators
 //////////////////////////////////////////////////////////////////////
@@ -13,13 +13,6 @@
 #include <torch/torch.h>
 #include <stdlib.h>
 #include <vector>
-
-//x    ==                  input
-//cs_p  ==            cell state (from previous iteration)
-//hs_p  ==          hidden state
-//xOps  ==           x operators
-//hOps  ==      hidden operators
-
 
 //in pytorch the sigmoid function is defined as sig(x) = 1/(1+exp(-x)) -> d/dx_sig(x) = sig(x)*(1 - sig(x))
 torch::Tensor d_sigmoid(torch::Tensor x)
