@@ -2,3 +2,4 @@ BATCH_SIZE = 100
 HIST_SIZE = 10
 TARG_SIZE = 10
 DATA_FILE = 'BTC_USD_2013-10-01_2020-01-28-CoinDesk.csv'
+MODEL_SAVE_PATH = './build_tools/lstm_saves.pth'
