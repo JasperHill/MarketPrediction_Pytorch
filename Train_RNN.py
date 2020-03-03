@@ -22,7 +22,6 @@ import numpy               as np
 import pandas              as pd
 import matplotlib.pyplot   as plt
 
-from optparse              import OptionParser
 from torch.autograd        import Function
 from torch.utils.data      import Dataset, DataLoader
 """
@@ -73,6 +72,7 @@ def integrate_output(ref_prices_pt, ref_idxs, output):
 
 def percent_error(pred_vals, true_vals):
     f = 100*(pred_vals-true_vals)/true_vals
+    return f
 
 class BTC_Dataset(Dataset):
     def __init__(self, data, START, END, history_size, target_size, overlap):
@@ -107,17 +107,17 @@ class BTC_Dataset(Dataset):
     
 ## auxiliary plotting function for visualization
 def plot_data(true_values, predictions, idxs, hist_size, targ_size, overlap, title, filename):
-    fig = plt.figure(figsize=(10,10))
+    fig = plt.figure(figsize=(10,8))
     labels = [['True high', 'True low'], ['Predicted high', 'Predicted low']]
-    colors = [['blue','red'], ['green','yellow']]
+    colors = [['blue','red'], ['cyan','magenta']]
 
-    ref_range = range(idxs[0]-hist_size, idxs[-1])
+    ref_range = range(idxs[0]-hist_size, idxs[-1]+1)
     plt.title(title)
 
     ## plot true values
     plt.plot(ref_range, true_values[0][ref_range], color=colors[0][0], marker='.', markersize=1, label=labels[0][0])
     plt.plot(ref_range, true_values[1][ref_range], color=colors[0][1], marker='.', markersize=1, label=labels[0][1])
-    print('idxs shape: {} | predictions shape: {}'.format(idxs.shape, predictions[0].shape))
+
     ## plot predicted values
     plt.plot(idxs, predictions[0], color=colors[1][0], marker='.', markersize=1, label=labels[1][0])
     plt.plot(idxs, predictions[1], color=colors[1][1], marker='.', markersize=1, label=labels[1][1])
@@ -125,7 +125,8 @@ def plot_data(true_values, predictions, idxs, hist_size, targ_size, overlap, tit
     
     plt.legend()
     plt.xlim(xmin=idxs[0]-hist_size, xmax=(idxs[-1]+5))
-    plt.xlabel('time step (d)')
+    plt.xlabel('absolute time step (d)')
+    plt.ylabel('value ($)')
     plt.savefig(filename+'.pdf')        
     plt.close(fig)
     
@@ -135,18 +136,18 @@ def plot_data(true_values, predictions, idxs, hist_size, targ_size, overlap, tit
 ##  create datasets and import training parameters
 #########################################################################
 
-train_frac  =                               0.6
+train_frac  =        MODEL_CONSTANTS.TRAIN_FRAC
 LENGTH      =                 len(prices_pt[0])
 START_IDX   =                                 0
 TRAIN_SPLIT =   int(np.ceil(train_frac*LENGTH))
 HIST_SIZE   =         MODEL_CONSTANTS.HIST_SIZE
 TARG_SIZE   =         MODEL_CONSTANTS.TARG_SIZE
-OVERLAP     =                                 0
+OVERLAP     =           MODEL_CONSTANTS.OVERLAP
 
 BATCH_SIZE  =        MODEL_CONSTANTS.BATCH_SIZE
 BUFFER_SIZE =                              1000
 NUM_WORKERS =                                 1
-EPOCHS      =                          range(1)
+EPOCHS      = range(MODEL_CONSTANTS.NUM_EPOCHS)
 
 
 train_ds = BTC_Dataset(prices_pt, START_IDX, TRAIN_SPLIT, HIST_SIZE, TARG_SIZE, OVERLAP)
@@ -202,7 +203,6 @@ for epoch in EPOCHS:
         
         if (epoch == EPOCHS[-1]):
             j = random.randrange(0,len(test_dl))
-            print('j = ',j)            
         
         for data in test_dl:
             x, y, y_idxs = data['x'], data['y'], data['y_idxs']
@@ -228,11 +228,14 @@ for epoch in EPOCHS:
     print('|')
 
 final_y = integrate_output(ref_prices_pt, ref_idxs, final_pred)
-plot_data(ref_prices_pt, final_y, ref_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, 'Bitcoin Price Over Time', 'Network_Prediction')
+
+# pass ref_prices_pt[:,1:] because training data is the relative change between timesteps
+plot_data(ref_prices_pt[:,1:], final_y, ref_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, 'Bitcoin Price Over Time', 'Network_Prediction')
 
 pe = percent_error(final_y, ref_prices_pt[:,ref_idxs])
 
-plt.figure(num=0, figsize=(10,10))
+## plot network MSE over training epochs
+plt.figure(num=0, figsize=(10,8))
 plt.plot(EPOCHS, np.asarray(train_MSE_hist), c='blue', linestyle='-', label='training loss')
 plt.plot(EPOCHS, np.asarray(test_MSE_hist), c='red', linestyle='--', label='testing loss')
 plt.xlabel('epoch')
@@ -242,4 +245,16 @@ plt.legend()
 plt.savefig('RNN_MSE.pdf')
 plt.close(0)
 
-torch.save(lstm_model.state_dict(), LSTM_MODEL_SAVE_PATH)
+## plot percent error of predictions
+plt.figure(num=1, figsize=(10,8))
+plt.plot(ref_idxs, pe[0], c='black', linestyle='-', label='high price')
+plt.plot(ref_idxs, pe[1], c='grey', linestyle='-', label='low price')
+plt.xlabel('absolute timestep (d)')
+plt.ylabel('error (%)')
+plt.title('Network Performance')
+plt.legend()
+plt.savefig('RNN_PE.pdf')
+plt.close(1)
+
+
+torch.save(lstm_model.state_dict(), MODEL_CONSTANTS.MODEL_SAVE_PATH)
