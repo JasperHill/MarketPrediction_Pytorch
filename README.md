@@ -21,3 +21,5 @@ The network takes inputs of shape `(BATCH_SIZE, 2, HIST_SIZE)` and yields output
 ## Training
 The network is trained by calling `Train_RNN.py`. The flag `-c` will create a new, untrained model and save it to `MODEL_CONSTANTS.MODEL_SAVE_PATH` after training. Otherwise, the script will assume a model already exists at that path, load it, and train it. After `NUM_EPOCHS` training epochs have been completed, a sample from the testing dataset is propagated through the network, and the output is integrated and plotted alongside true market prices, saved as `Network_Prediction.pdf`. Also saved are graphs of the mean squared error (MSE) and the percent error of each prediction element as `RNN_MSE.pdf` and `RNN_PE.pdf` respectively. Finally, the trained network state dictionary is saved. 
 
+## Testing
+An arbitrary sequence of testing data may be propagated through a pretrained RNN by running `Test_RNN.py --index=idx` where `idx` is the dataset index to be propagated. The result will be plotted alongside real data and saved to `Network_Test.pdf`. Note also that the beginning timestep of the output will be offset by `MODEL_CONSTANTS.HIST_SIZE - MODEL_CONSTANTS.OVERLAP`.
