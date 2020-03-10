@@ -1,5 +1,5 @@
 #########################################################################
-##  BPI_RNN.py
+##  Train_RNN.py
 ##  Feb. 2020 - J. Hill
 #########################################################################
 
@@ -14,6 +14,7 @@ import random
 import pathlib
 import MODEL_CONSTANTS
 import BPI_RNN
+import Aux
 import torch
 import torch.nn            as nn
 import torch.nn.functional as F
@@ -23,151 +24,49 @@ import pandas              as pd
 import matplotlib.pyplot   as plt
 
 from torch.autograd        import Function
-from torch.utils.data      import Dataset, DataLoader
-"""
+from optparse              import OptionParser
 
 """
 
-random.seed(time.time())
-
-#########################################################################
-##  preprocess data
-#########################################################################
-
-## import data file
-cwd = os.getcwd()
-data_path = os.path.join(cwd,'data')
-data_path = os.path.join(data_path, MODEL_CONSTANTS.DATA_FILE)
-
-pd_object = pd.read_csv(data_path,usecols=['Date','24h High (USD)','24h Low (USD)'])
-np_object = pd_object.to_numpy()
-
-## collect dates and prices from np_object
-dates          =             np_object[:,0]
-prices_raw     =             np.asarray(np_object[:,1:], dtype=np.float64)
-
-## express each element as the relative difference between neighboring prices
-prices_div      =            np.asarray(prices_raw[:-1])
-prices_num      =            np.asarray(prices_raw[1:])
-prices          =            np.divide(prices_num, prices_div) - 1
-
-## convert array to torch tensors and reshape to (high/low, timestep)
-prices_pt       =            torch.transpose(torch.from_numpy(prices), 0, 1)
-ref_prices_pt   =            torch.transpose(torch.from_numpy(prices_raw), 0, 1)
-
-
-def integrate_output(ref_prices_pt, ref_idxs, output):
-    #create high/low reference prices
-    ref_prices = ref_prices_pt[:,ref_idxs[0]]
-    
-    y = torch.empty_like(output)
-    timesteps = output.shape[-1]
-
-    for i in range(timesteps):
-        prices = ref_prices * (output[:,i]+1)
-        ref_prices = prices
-        y[:,i] = prices
-
-    return y
-
-def percent_error(pred_vals, true_vals):
-    f = 100*(pred_vals-true_vals)/true_vals
-    return f
-
-class BTC_Dataset(Dataset):
-    def __init__(self, data, START, END, history_size, target_size, overlap):
-        super(BTC_Dataset, self).__init__()
-        self.history_size = history_size
-        self.target_size = target_size
-
-        self.start = START + history_size
-        self.overlap = overlap
-        self.data = data
-
-        if END is None: END = len(self.data[0])
-        END -= target_size-overlap
-
-        self.end = END
-        
-    def __len__(self):
-        return self.end-self.start
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx): idx = idx.tolist()
-        
-        idx += self.history_size
-        x_idxs = range(idx-self.history_size, idx)
-        x = self.data[:,x_idxs]
-        
-        y_idxs = range(idx-self.overlap, idx-self.overlap+self.target_size)
-        y_idxs = torch.tensor(y_idxs)
-        y = self.data[:,y_idxs]
-
-        return {'x': x, 'y': y, 'y_idxs': y_idxs}
-    
-## auxiliary plotting function for visualization
-def plot_data(true_values, predictions, idxs, hist_size, targ_size, overlap, title, filename):
-    fig = plt.figure(figsize=(10,8))
-    labels = [['True high', 'True low'], ['Predicted high', 'Predicted low']]
-    colors = [['blue','red'], ['cyan','magenta']]
-
-    ref_range = range(idxs[0]-hist_size, idxs[-1]+1)
-    plt.title(title)
-
-    ## plot true values
-    plt.plot(ref_range, true_values[0][ref_range], color=colors[0][0], marker='.', markersize=1, label=labels[0][0])
-    plt.plot(ref_range, true_values[1][ref_range], color=colors[0][1], marker='.', markersize=1, label=labels[0][1])
-
-    ## plot predicted values
-    plt.plot(idxs, predictions[0], color=colors[1][0], marker='.', markersize=1, label=labels[1][0])
-    plt.plot(idxs, predictions[1], color=colors[1][1], marker='.', markersize=1, label=labels[1][1])
-
-    
-    plt.legend()
-    plt.xlim(xmin=idxs[0]-hist_size, xmax=(idxs[-1]+5))
-    plt.xlabel('absolute time step (d)')
-    plt.ylabel('value ($)')
-    plt.savefig(filename+'.pdf')        
-    plt.close(fig)
-    
-
+"""
+parser = OptionParser()
+parser.add_option("-c", "--create_new_rnn", action="store_true", default=False, dest="create")
+(options, args) = parser.parse_args()
+create = options.create
 
 #########################################################################
 ##  create datasets and import training parameters
 #########################################################################
 
-train_frac  =        MODEL_CONSTANTS.TRAIN_FRAC
-LENGTH      =                 len(prices_pt[0])
-START_IDX   =                                 0
-TRAIN_SPLIT =   int(np.ceil(train_frac*LENGTH))
 HIST_SIZE   =         MODEL_CONSTANTS.HIST_SIZE
 TARG_SIZE   =         MODEL_CONSTANTS.TARG_SIZE
 OVERLAP     =           MODEL_CONSTANTS.OVERLAP
 
 BATCH_SIZE  =        MODEL_CONSTANTS.BATCH_SIZE
-BUFFER_SIZE =                              1000
-NUM_WORKERS =                                 1
 EPOCHS      = range(MODEL_CONSTANTS.NUM_EPOCHS)
 
-
-train_ds = BTC_Dataset(prices_pt, START_IDX, TRAIN_SPLIT, HIST_SIZE, TARG_SIZE, OVERLAP)
-test_ds  = BTC_Dataset(prices_pt, TRAIN_SPLIT, None, HIST_SIZE, TARG_SIZE, OVERLAP)
-
-train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
-test_dl = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+train_dl, test_dl = Aux.train_dl, Aux.test_dl
 
 train_size = len(train_dl)
-test_size = len(train_dl)
+test_size = len(test_dl)
 
 #########################################################################
 ##  create/load and train the model
 #########################################################################
 
+
 lstm_model = BPI_RNN.LSTM_Model(BATCH_SIZE, 2, HIST_SIZE, 2, TARG_SIZE)
-lstm_model.load_state_dict(torch.load(MODEL_CONSTANTS.MODEL_SAVE_PATH))
 
-optimizer = optim.Adam(lstm_model.parameters())
+if create:
+    BPI_RNN.save_model(lstm_model)
 
+else:
+    lstm_model.load_state_dict(torch.load(MODEL_CONSTANTS.MODEL_SAVE_PATH))
+
+optimizer = optim.Adam(lstm_model.parameters(), lr=MODEL_CONSTANTS.LR)
+
+## reference prices for assessing network performance
+ref_prices_pt = Aux.ref_prices_pt
 final_ys, ref_idxs = None, None
 train_MSE_hist = []
 test_MSE_hist  = []
@@ -196,6 +95,7 @@ for epoch in EPOCHS:
         optimizer.step()
 
         train_loss += loss.item()
+
     train_MSE_hist.append(train_loss/train_size)
 
     with torch.no_grad():
@@ -227,12 +127,12 @@ for epoch in EPOCHS:
         print('|{: >30.3e}'.format(num), end='')
     print('|')
 
-final_y = integrate_output(ref_prices_pt, ref_idxs, final_pred)
+final_y = Aux.integrate_output(ref_prices_pt, ref_idxs, final_pred)
 
 # pass ref_prices_pt[:,1:] because training data is the relative change between timesteps
-plot_data(ref_prices_pt[:,1:], final_y, ref_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, 'Bitcoin Price Over Time', 'Network_Prediction')
+Aux.plot_data(ref_prices_pt[:,1:], final_y, ref_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, 'Bitcoin Price Over Time', 'Network_Prediction')
 
-pe = percent_error(final_y, ref_prices_pt[:,ref_idxs])
+pe = Aux.percent_error(final_y, ref_prices_pt[:,ref_idxs])
 
 ## plot network MSE over training epochs
 plt.figure(num=0, figsize=(10,8))

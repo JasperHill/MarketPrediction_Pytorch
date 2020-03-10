@@ -63,7 +63,7 @@ class LSTM_Op(nn.Module):
         hOps[:,:] = torch.eye(self.output_dim)
         
         # set x operators to identity in input_dim-dimensional space
-        for i in range(self.input_dim):
+        for i in range(min(self.output_dim, self.input_dim)):
             xOps[:,:,:,i,i] = 1
 
         self.xOps = nn.Parameter(xOps)

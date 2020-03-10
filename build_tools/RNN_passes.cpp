@@ -33,17 +33,6 @@ torch::Tensor d_tanh(torch::Tensor x)
 std::vector< torch::Tensor > LSTM_Op_forward(torch::Tensor x, torch::Tensor c_p, torch::Tensor h_p, \
 					  torch::Tensor xOps, torch::Tensor hOps)
 {
-  //auto gate_xOps = xOps.chunk(4,0);//separates x operators into (input, forget, cell, output) operators
-  //auto gate_hOps = hOps.chunk(4,0);//ditto for hidden operators
-
-  //std::cout << "x sizes: " << x.sizes() << std::endl;
-  //std::cout << "op sizes: " << xOps[0].sizes() << std::endl;
-
-  //std::cout << "h sizes: " << h_p.sizes() << std::endl;
-  //std::cout << "hOp sizes: " << hOps[0].sizes() << std::endl;
-
-  //std::cout<<"temp1 shape: "<<temp1.sizes()<<std::endl;
-  //std::cout<<"temp2 shape: "<<temp2.sizes()<<std::endl;
   //contracting along the -1 axes of the vector and the operator corresponds to x^† * Op^†  
   auto xi = torch::add(at::tensordot(x, xOps[0], {-2, -1}, {-3, -1}), at::tensordot(h_p, hOps[0], {-2, -1}, {-3, -1}));
   auto xf = torch::add(at::tensordot(x, xOps[1], {-2, -1}, {-3, -1}), at::tensordot(h_p, hOps[1], {-2, -1}, {-3, -1}));
@@ -73,7 +62,7 @@ std::vector< torch::Tensor > LSTM_Op_backward(torch::Tensor x, torch::Tensor X, 
   auto options = torch::TensorOptions().dtype(torch::kFloat64);
   
 
-  int64_t n,i,ii,j,jj,k,kk;
+  int64_t n,i,ii,j,jj,k;
   int64_t batch_size = x_dims[0];
   int64_t input_dim = x_dims[2];
   int64_t input_channels = x_dims[1];
@@ -89,6 +78,13 @@ std::vector< torch::Tensor > LSTM_Op_backward(torch::Tensor x, torch::Tensor X, 
   auto grad_hOps = torch::zeros({4, output_channels, input_channels, output_dim, output_dim}, options);
 
   //todo: parallelize
+#pragma omp parallel default(none) schedule(dynamic)			\
+  firstprivate(x, X_t, c, c_p, h_p, batch_size, output_channels, output_dim, input_channels, input_dim) \
+  shared(grad_input, grad_xOps, grad_hOps)				\
+  private(n,i,ii,j,jj,k)
+  {
+    #pragma omp for nowait
+    
   for (n = 0; n < batch_size; n++)
     {
       auto c_n = c[n];
@@ -120,27 +116,27 @@ std::vector< torch::Tensor > LSTM_Op_backward(torch::Tensor x, torch::Tensor X, 
 		      grad_xOps[2][i][ii][j][k] += grad_X_n[2][i][j] * x_n[ii][k];
 		      grad_xOps[1][i][ii][j][k] += grad_X_n[1][i][j] * x_n[ii][k];
 		      grad_xOps[0][i][ii][j][k] += grad_X_n[0][i][j] * x_n[ii][k];
-
-
-		      //use input_channel indices for h_p_n because hOps generate outputs
-		      //by acting on input channels of h_p
-		      grad_hOps[3][i][ii][j][k] += grad_X_n[3][i][j] * h_p_n[ii][k];
-		      grad_hOps[2][i][ii][j][k] += grad_X_n[2][i][j] * h_p_n[ii][k];
-		      grad_hOps[1][i][ii][j][k] += grad_X_n[1][i][j] * h_p_n[ii][k];
-		      grad_hOps[0][i][ii][j][k] += grad_X_n[0][i][j] * h_p_n[ii][k];
 		      
 		      grad_input_n[ii][k] += grad_X_n[3][i][j] * xOps[3][i][ii][j][k];
 		      grad_input_n[ii][k] += grad_X_n[2][i][j] * xOps[2][i][ii][j][k];
 		      grad_input_n[ii][k] += grad_X_n[1][i][j] * xOps[1][i][ii][j][k];
 		      grad_input_n[ii][k] += grad_X_n[0][i][j] * xOps[0][i][ii][j][k];		      
 		    }
-		}
 
-	      
+		  for (k = 0; k < output_dim; k++)
+		    {
+		      //use input_channel indices for h_p_n because hOps generate outputs
+		      //by acting on input channels of h_p		      
+		      grad_hOps[3][i][ii][j][k] += grad_X_n[3][i][j] * h_p_n[ii][k];
+		      grad_hOps[2][i][ii][j][k] += grad_X_n[2][i][j] * h_p_n[ii][k];
+		      grad_hOps[1][i][ii][j][k] += grad_X_n[1][i][j] * h_p_n[ii][k];
+		      grad_hOps[0][i][ii][j][k] += grad_X_n[0][i][j] * h_p_n[ii][k];		      		      
+		    }
+		}	      
 	    }
 	}
     }
-
+  }
   //c and h are not trainable parameters so return zero gradients
   auto grad_c_p = torch::zeros_like(c_p, options);
   auto grad_h_p = torch::zeros_like(h_p, options);
@@ -148,6 +144,7 @@ std::vector< torch::Tensor > LSTM_Op_backward(torch::Tensor x, torch::Tensor X, 
   return {grad_input, grad_c_p, grad_h_p, grad_xOps, grad_hOps};
   
 }//end of LSTM_Op_backward
+
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
