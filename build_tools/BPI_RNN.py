@@ -8,21 +8,7 @@ import torch.nn            as nn
 import numpy               as np
 import torch.nn.functional as F
 
-from Custom_RNNs import LSTM_Op
-from optparse    import OptionParser
-
-parser = OptionParser()
-parser.add_option("--save_model", action='store_true', dest="save")
-options, args = parser.parse_args()
-save = options.save
-
-##################################################################################
-##  set model hyperparameters
-##################################################################################
-
-HIST_SIZE        = MODEL_CONSTANTS.HIST_SIZE
-TARG_SIZE        = MODEL_CONSTANTS.TARG_SIZE
-BATCH_SIZE       = MODEL_CONSTANTS.BATCH_SIZE
+from Custom_RNNs import LSTM_Op, MC_LSTM_Op
 
 class LSTM_Model(nn.Module):
     def __init__(self, batch_size, input_channels, input_dim, output_channels, output_dim):
@@ -35,19 +21,42 @@ class LSTM_Model(nn.Module):
         self.batch_size = batch_size
 
         self.lstm_op = LSTM_Op(batch_size, input_channels, input_dim, output_channels, output_dim)
-        #self.linear  = nn.Linear(in_features=output_dim, out_features=output_dim)
         self.tanh    = nn.Tanh()
 
     def forward(self, x):
-        x = self.lstm_op(x)
-        #x = self.linear(x)
+        h = self.lstm_op(x)
+        
+        return h
 
-        return self.tanh(x)
+    def detach_states(self):
+        self.lstm_op.detach_states()
+        return
 
-LSTM_MODEL_SAVE_PATH = "./lstm_saves.pth"
+# TODO: create multi-channel LSTM_Model class capable of consisting of two layers of parallel LSTM_Ops
+# that convolve data from multiple inputs to generate the same number of output tensors
 
-# 2 input and output channels for high/low prices
-lstm_model = LSTM_Model(BATCH_SIZE, 2, HIST_SIZE, 2, TARG_SIZE)
+class MC_LSTM_Model(nn.Module):
+    def __init__(self, batch_size, input_currencies, input_channels, input_dim, output_currencies, output_channels, output_dim):
+        super(MC_LSTM_Model, self).__init__()
+        self.input_channels  = input_channels
+        self.input_dim       = input_dim
+        
+        self.output_dim      = output_dim
+        self.output_channels = output_channels
+        self.batch_size      = batch_size
 
-if save:
-    torch.save(lstm_model.state_dict(), LSTM_MODEL_SAVE_PATH)
+        self.mc_lstm_op  = MC_LSTM_Op(batch_size, input_currencies, input_channels, input_dim, output_currencies, output_channels, output_dim)
+        self.tanh        = nn.Tanh()
+
+    def forward(self, x):
+        h = self.mc_lstm_op(x)
+
+        return self.tanh(h)
+
+    def detach_states(self):
+        self.mc_lstm_op.detach_states()
+        return
+
+def save_model(Model):
+    torch.save(Model.state_dict(), MODEL_CONSTANTS.MODEL_SAVE_PATH)
+    
