@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.getcwd(), 'build_tools'))
 
 import time
 import random
+import math
 import pathlib
 import MODEL_CONSTANTS
 import BPI_RNN
@@ -67,10 +68,6 @@ def prepare_data(currency, multi_currency, dictionary):
             file_path = ENTRY['DATA_FILE']
             print('     -loading {}'.format(file_path))            
             pd_object = pd.read_csv(os.path.join(data_path,file_path), usecols=ENTRY['usecols'])
-
-            for idx in ENTRY['axes_map']:
-                pd_object = pd_object.swapaxes(pair[0], pair[1])
-                
             pd_objects.append(pd_object)
 
 
@@ -116,27 +113,17 @@ def prepare_data(currency, multi_currency, dictionary):
         return dates, prices_pt, ref_prices_pt
 
     elif (multi_currency == 0):
-        data_file = None
-        axes_map = None
+        entry = None
         
-        if   (MODEL_CONSTANTS.CURRENCY == 'BTC'): data_file = MODEL_CONSTANTS.BTC_DATA_FILE
-        elif (MODEL_CONSTANTS.CURRENCY == 'ETH'): data_file = MODEL_CONSTANTS.ETH_DATA_FILE
-        elif (MODEL_CONSTANTS.CURRENCY == 'LTC'): data_file = MODEL_CONSTANTS.LTC_DATA_FILE
-        elif (MODEL_CONSTANTS.CURRENCY == 'MKR'): data_file = MODEL_CONSTANTS.MKR_DATA_FILE
-        
-        file_path = os.path.join(data_path, data_file)
-        print('     -loading {}'.format(data_file))
-        
-        if (currency == 'BTC' or currency == 'ETH'):
-            pd_object = pd.read_csv(file_path, usecols=
-                                    ['Date','Closing Price (USD)','24h Open (USD)','24h High (USD)', '24h Low (USD)'])
-            axes_map = [2,3,1,0]
+        for ENTRY in MODEL_CONSTANTS.LOADING_DICT:
+            if (ENTRY['currency'] == MODEL_CONSTANTS.CURRENCY): entry = ENTRY
 
-        elif (currency == 'LTC' or currency == 'MKR'):
-            pd_object = pd.read_csv(file_path, usecols=
-                                    ['date','close','high','low','open'])
-            axes_map = [1,2,3,0]
+        file_path = os.path.join(data_path, entry['DATA_FILE'])
+        print('     -loading {}'.format(entry['DATA_FILE']))
 
+        pd_object = pd.read_csv(file_path, usecols=entry['usecols'])
+        axes_map = entry['axes_map']
+        
         ## isolate dates
         dates = pd_object['Date']
         pd_object = pd_object.drop(labels='Date', axis=1)
@@ -244,28 +231,86 @@ class Crypto_Dataset(Dataset):
 
         return {'x': x, 'y': y, 'y_idxs': y_idxs}
 
+## multi classification dataset
+class Categorical_Crypto_Dataset(Dataset):
+    def __init__(self, data, START, END, history_size, target_size, thresh):
+        super(Categorical_Crypto_Dataset, self).__init__()
+        self.history_size = history_size
+        self.target_size = target_size
+
+        self.start = START + history_size
+        self.data = data
+        self.thresh = thresh
+
+        if END is None: END = len(self.data[0])
+        END -= target_size
+
+        self.end = END
+        
+    def __len__(self):
+        return self.end-self.start
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx): idx = idx.tolist()
+        
+        idx += self.start
+        x_idxs = range(idx-self.history_size+1, idx+1)
+        x = self.data[:NUM_INPUT_CHANNELS,x_idxs]
+        x_ref = x[:, -1]
+        
+        # __getitem__ is defined according to the channel ordering of high/low/open/close
+        # label is 1 if a future high exceeds the day's high by more than thresh
+        # label is -1 if a future low is less than day's low by more than thresh
+        # label is 0 otherwise
+        label = torch.zeros([4])
+        y_idxs = range(idx+1, idx+self.target_size+1)
+        y_idxs = torch.tensor(y_idxs)
+        
+        for y_idx in y_idxs:
+            if     (self.data[0, y_idx]/x_ref[-1] >= 1 + 2*self.thresh): label[0]  =  1
+            elif   (self.data[0, y_idx]/x_ref[-1] >= 1 + 1*self.thresh): label[1]  =  1
+            
+            if     (self.data[1, y_idx]/x_ref[-1] <= 1 - 1*self.thresh): label[3]  =  1
+            elif   (self.data[1, y_idx]/x_ref[-1] <= 1 - 2*self.thresh): label[4]  =  1            
+            
+
+        return {'x': x, 'y': label}
+
+    def get_item_alt(self, idx):
+        if torch.is_tensor(idx): idx = idx.tolist()
+
+        idx += self.start
+        x_idxs = range(idx-self.history_size+1, idx+1)
+        x = self.data[:NUM_INPUT_CHANNELS,x_idxs]
+
+        label = None
+
+        return {'x': x, 'y': label}
+
+    
 ## special first-order correction dataset for gradient-boosted models
 class NLO_Crypto_Dataset(Dataset):
     ## this class is initialized with a Crypto_Dataset class as its data and a trained model
     def __init__(self, LO_dataset, NLO_dataset):
         super(NLO_Crypto_Dataset, self).__init__()
-        self.dataset = LO_dataset
+        self.LO_dataset = LO_dataset
+        self.NLO_dataset = NLO_dataset
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.LO_dataset)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx): idx = idx.tolist()
-        data = self.dataset[idx]
+        data = self.LO_dataset[idx]
         x = data['x']
-        delta_y = data['y']
+        delta_y = self.NLO_dataset[idx]['y']
         y_idxs = data['y_idxs']
         
         return {'x': x, 'y': delta_y, 'y_idxs': y_idxs}
 
     def get_item_alt(self, idx):
         if torch.is_tensor(idx): idx = idx.tolist()
-        return self.dataset.get_item_alt(idx)
+        return self.LO_dataset.get_item_alt(idx)
 
 ## create a next-to-leading-order dataset
 def create_NLO_Crypto_Dataset(dataset, models):
@@ -356,7 +401,7 @@ def plot_data(true_values, predictions, true_idxs, pred_idxs, hist_size, targ_si
     new_dates = pd.date_range(dates[x_ticks[0]+1], periods=delta_T)
 
     for i in range(delta_T):
-        if (i % 2 == 0):
+        if (i % int(math.floor(delta_T/5)) == 0):
             tick_labels.append(new_dates[i].date())
             ticks.append(x_ticks[i])
         else: tick_labels.append('')
@@ -473,28 +518,33 @@ def plot_prediction_surface(true_values, predictions, idxs, targ_size, title, fi
 ## create dataset and dataloader
 def create_ds_and_dl():
     print('-creating dataset and dataloader')
-    if (MODEL_CONSTANTS.MC == 0):
-        train_ds = Crypto_Dataset(prices_pt, MODEL_CONSTANTS.START_IDX, None, MODEL_CONSTANTS.HIST_SIZE,
-                                  MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP)
+    if (MODEL_CONSTANTS.CATEGORICAL == 0):
+        if (MODEL_CONSTANTS.MC == 0):
+            train_ds = Crypto_Dataset(prices_pt, MODEL_CONSTANTS.START_IDX, None, MODEL_CONSTANTS.HIST_SIZE,
+                                      MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP)
         
-        if (MODEL_CONSTANTS.ORDER > 0):
-            LO_models = []
-            LO_lstm_model = BPI_RNN.LSTM_Model(MODEL_CONSTANTS.BATCH_SIZE, MODEL_CONSTANTS.NUM_DATA_CHANNELS,
-                                               MODEL_CONSTANTS.HIST_SIZE, MODEL_CONSTANTS.NUM_DATA_CHANNELS, MODEL_CONSTANTS.TARG_SIZE)
-            
-            for i in range(MODEL_CONSTANTS.ORDER):
-                save_path, _, _ = MODEL_CONSTANTS.create_save_paths(MODEL_CONSTANTS.CURRENCY, MODEL_CONSTANTS.ORDER-(i+1), 1,
-                                                                    MODEL_CONSTANTS.BATCH_SIZE, MODEL_CONSTANTS.HIST_SIZE,
-                                                                    MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP, MODEL_CONSTANTS.LR)
-    
-                LO_lstm_model.load_state_dict(torch.load(save_path))
-                LO_models.append(LO_lstm_model)
-    
-            train_ds = create_NLO_Crypto_Dataset(train_ds, LO_models)
-            
-    elif(MODEL_CONSTANTS.MC == 1):
-        train_ds = MC_Crypto_Dataset(prices_pt, MODEL_CONSTANTS.START_IDX, None, MODEL_CONSTANTS.HIST_SIZE,
-                                     MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP)
+            if (MODEL_CONSTANTS.ORDER > 0):
+                LO_models = []
+                LO_lstm_model = BPI_RNN.LSTM_Model(MODEL_CONSTANTS.BATCH_SIZE, MODEL_CONSTANTS.NUM_INPUT_CHANNELS,
+                                                   MODEL_CONSTANTS.HIST_SIZE, MODEL_CONSTANTS.NUM_OUTPUT_CHANNELS, MODEL_CONSTANTS.TARG_SIZE)
+                
+                for i in range(MODEL_CONSTANTS.ORDER):
+                    save_path, _, _ = MODEL_CONSTANTS.create_save_paths(MODEL_CONSTANTS.CURRENCY, MODEL_CONSTANTS.ORDER-(i+1), 1,
+                                                                        MODEL_CONSTANTS.BATCH_SIZE, MODEL_CONSTANTS.HIST_SIZE,
+                                                                        MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP, MODEL_CONSTANTS.LR)
+                    
+                    LO_lstm_model.load_state_dict(torch.load(save_path))
+                    LO_models.append(LO_lstm_model)
+                    
+                    train_ds = create_NLO_Crypto_Dataset(train_ds, LO_models)
+                    
+            elif(MODEL_CONSTANTS.MC == 1):
+                train_ds = MC_Crypto_Dataset(prices_pt, MODEL_CONSTANTS.START_IDX, None, MODEL_CONSTANTS.HIST_SIZE,
+                                             MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.OVERLAP)
+
+    else:
+        train_ds = Categorical_Crypto_Dataset(prices_pt, MODEL_CONSTANTS.START_IDX, None, MODEL_CONSTANTS.HIST_SIZE,
+                                              MODEL_CONSTANTS.TARG_SIZE, MODEL_CONSTANTS.THRESH)
         
     train_dl = DataLoader(train_ds, batch_size=MODEL_CONSTANTS.BATCH_SIZE, shuffle=False, num_workers=1)        
 
