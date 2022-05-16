@@ -80,7 +80,7 @@ for i in range(MODEL_CONSTANTS.ORDER+1):
                                                           BATCH_SIZE, HIST_SIZE, TARG_SIZE, OVERLAP, MODEL_CONSTANTS.LR)
     
     lstm_model.load_state_dict(torch.load(pth))
-    lstm_model.lstm_op.load_states(torch.load(c_pth), torch.load(h_pth))
+    #lstm_model.lstm_op.load_states(torch.load(c_pth), torch.load(h_pth))
     lstm_models.append(lstm_model)
     
 ## reference prices for assessing network performance
@@ -132,40 +132,55 @@ else:
 #########################################################################
 
     with torch.no_grad():
-        for i in range(len(test_ds), len(test_ds)+TARG_SIZE):
+        #for i in range(len(test_ds), len(test_ds)+TARG_SIZE):
+        for i in range(len(test_ds) + TARG_SIZE):
             data = test_ds.get_item_alt(i)
-
+            
             x, _, y_idxs = data['x'], data['y'], data['y_idxs']
             x = torch.unsqueeze(x, 0)
             ref_idxs = np.arange(y_idxs[0]-TARG_SIZE, y_idxs[0])
-
+                
             y_pred = torch.zeros_like(lstm_models[0](x))
-            
+
             for model in lstm_models:
                 y_pred += model(x)
                     
-            final_pred = torch.squeeze(y_pred, 0)                    
-            final_y = Aux.integrate_output(ref_prices_pt[:NUM_OUTPUT_CHANNELS], y_idxs, final_pred)
-
-        if save:
-            for i in range(MODEL_CONSTANTS.ORDER+1):
-                pth, c_pth, h_pth = MODEL_CONSTANTS.create_save_paths(MODEL_CONSTANTS.CURRENCY, MODEL_CONSTANTS.ORDER-i, MODEL_CONSTANTS.TRAIN_FRAC,
-                                                                      BATCH_SIZE, HIST_SIZE, TARG_SIZE, OVERLAP, MODEL_CONSTANTS.LR)
-
-                for model in lstm_models:
-                    torch.save(model.state_dict(), pth)
-                    torch.save(model.lstm_op.c, c_pth)            
-                    torch.save(model.lstm_op.h, h_pth)
-                
+                final_pred = torch.squeeze(y_pred, 0)                    
+                final_y = Aux.integrate_output(ref_prices_pt[:NUM_OUTPUT_CHANNELS], y_idxs, final_pred)
+                    
+                if save:
+                    for i in range(MODEL_CONSTANTS.ORDER+1):
+                        pth, c_pth, h_pth = MODEL_CONSTANTS.create_save_paths(MODEL_CONSTANTS.CURRENCY, MODEL_CONSTANTS.ORDER-i, MODEL_CONSTANTS.TRAIN_FRAC,
+                                                                              BATCH_SIZE, HIST_SIZE, TARG_SIZE, OVERLAP, MODEL_CONSTANTS.LR)
+                            
+                        for model in lstm_models:
+                            torch.save(model.state_dict(), pth)
+                            torch.save(model.lstm_op.c, c_pth)            
+                            torch.save(model.lstm_op.h, h_pth)
+                            
         if (MODEL_CONSTANTS.MC == 0):
             # pass ref_prices_pt[:,1:] because training data is the relative change between timesteps
             LABELS = Aux.STANDARD_LABELS
-            
-            Aux.plot_data(ref_prices_pt[:,1:], final_y, ref_idxs, y_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, Aux.dates, 'Value Over Time', LABELS, 'Network_Test')
-
+                                    
+            Aux.plot_data(ref_prices_pt[:,1:], final_y, ref_idxs, y_idxs, HIST_SIZE, TARG_SIZE, OVERLAP, Aux.dates,
+                                  'Value Over Time', LABELS, 'Network_Test'+'_'+MODEL_CONSTANTS.CURRENCY)
+                
         elif (MODEL_CONSTANTS.MC == 1):
             for i in range(MODEL_CONSTANTS.NUM_CURRENCIES):
                 Aux.plot_data(ref_prices_pt[i,:,1:], final_y[i], ref_idxs[i], y_idxs[i], HIST_SIZE, TARG_SIZE, OVERLAP, Aux.dates,
                               'Value Over Time', MODEL_CONSTANTS.LOADING_DICT[i]['usecols'][1:], 'MC_Network_Test_'+MODEL_CONSTANTS.LOADING_DICT[i]['currency'])
 
+            for i in range(len(test_ds) + TARG_SIZE):
+                data = test_ds.get_item_alt(i)
                 
+                x, _, y_idxs = data['x'], data['y'], data['y_idxs']
+                x = torch.unsqueeze(x, 0)
+                ref_idxs = np.arange(y_idxs[0]-TARG_SIZE, y_idxs[0])
+                
+                y_pred = torch.zeros_like(lstm_models[0](x))
+                
+                for model in lstm_models:
+                    y_pred += model(x)
+
+                
+                        

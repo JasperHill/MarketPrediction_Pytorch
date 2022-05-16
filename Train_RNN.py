@@ -45,6 +45,7 @@ TRAIN_FRAC          =          MODEL_CONSTANTS.TRAIN_FRAC
 HIST_SIZE           =           MODEL_CONSTANTS.HIST_SIZE
 TARG_SIZE           =           MODEL_CONSTANTS.TARG_SIZE
 OVERLAP             =             MODEL_CONSTANTS.OVERLAP
+THRESH              =              MODEL_CONSTANTS.THRESH
 
 BATCH_SIZE          =          MODEL_CONSTANTS.BATCH_SIZE
 EPOCHS              =   range(MODEL_CONSTANTS.NUM_EPOCHS)
@@ -55,9 +56,16 @@ train_ds, train_dl = Aux.create_ds_and_dl()
 ##  create/load and train the model
 #########################################################################
 
-if (MODEL_CONSTANTS.MC == 0):   lstm_model = BPI_RNN.LSTM_Model(BATCH_SIZE, NUM_INPUT_CHANNELS, HIST_SIZE, NUM_OUTPUT_CHANNELS, TARG_SIZE)
-elif (MODEL_CONSTANTS.MC == 1): lstm_model = BPI_RNN.MC_LSTM_Model(BATCH_SIZE, NUM_CURRENCIES, NUM_INPUT_CHANNELS, HIST_SIZE,
+if (MODEL_CONSTANTS.CATEGORICAL == 0):
+    if (MODEL_CONSTANTS.MC == 0):   lstm_model = BPI_RNN.LSTM_Model(BATCH_SIZE, NUM_INPUT_CHANNELS, HIST_SIZE, NUM_OUTPUT_CHANNELS, TARG_SIZE)
+    elif (MODEL_CONSTANTS.MC == 1): lstm_model = BPI_RNN.MC_LSTM_Model(BATCH_SIZE, NUM_CURRENCIES, NUM_INPUT_CHANNELS, HIST_SIZE,
                                                                    NUM_CURRENCIES, NUM_OUTPUT_CHANNELS, TARG_SIZE)
+
+    status_labels = ['MSE loss', 'epoch CPU time (min)']
+    
+elif (MODEL_CONSTANTS.CATEGORICAL == 1):
+    lstm_model = BPI_RNN.Categorical_LSTM_Model(BATCH_SIZE, NUM_INPUT_CHANNELS, HIST_SIZE)
+    status_labels = ['loss', 'epoch CPU time (min)']    
 
 if create:
     BPI_RNN.save_model(lstm_model)
@@ -68,9 +76,9 @@ else:
 optimizer = optim.Adam(lstm_model.parameters(), lr=MODEL_CONSTANTS.LR)
 
 train_MSE_hist = []
-
 train_size = len(train_dl)
-status_labels = ['MSE loss', 'epoch CPU time (min)']
+
+
 
 
 
@@ -97,7 +105,8 @@ for epoch in EPOCHS:
         optimizer.zero_grad()
 
         y_pred = lstm_model(x).to(torch.double)
-
+        y = y.to(torch.double)
+        
         loss = F.mse_loss(y_pred, y, reduction='mean')
         loss.backward(retain_graph=False)
         optimizer.step()
@@ -107,7 +116,6 @@ for epoch in EPOCHS:
         lstm_model.detach_states()
         
         train_loss += loss.item()
-
         index_end = time.time()
         index_time = index_end-index_start
         index_time /= 60
@@ -137,7 +145,7 @@ for epoch in EPOCHS:
     epoch_end = time.time()
     duration = epoch_end-epoch_start
     
-    nums = [train_MSE_hist[-1], duration/60]
+    nums = [train_loss/train_size, duration/60]
     sys.stdout.write("\b" * 74)
     sys.stdout.flush()
     print('|{: >10}'.format(epoch), end='')
