@@ -1,4 +1,0 @@
-from __future__ import absolute_import, division, print_function
-import MODEL_CONSTANTS.py
-
-print(BATCH_SIZE)
